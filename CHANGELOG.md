@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/Vizards/deepseek-v4-for-copilot/compare/v0.6.0...v0.6.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* **provider:** dedupe streaming usage reports ([#145](https://github.com/Vizards/deepseek-v4-for-copilot/issues/145)) ([b3cbdfa](https://github.com/Vizards/deepseek-v4-for-copilot/commit/b3cbdfa8be7e3ee2139e2763014cf1b391e7cf80))
+* **provider:** disable thinking for internal helper requests ([#137](https://github.com/Vizards/deepseek-v4-for-copilot/issues/137)) ([6809989](https://github.com/Vizards/deepseek-v4-for-copilot/commit/680998971fb01ef9d88f70fa6bdd7709a510095c))
+
 ## [0.6.0](https://github.com/Vizards/deepseek-v4-for-copilot/compare/v0.5.3...v0.6.0) (2026-06-03)
 
 
