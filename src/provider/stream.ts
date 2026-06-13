@@ -83,7 +83,7 @@ export function streamChatCompletion({
 				},
 
 				onUsage: (usage) => {
-					recordUsage(usage, prepared.modelId);
+					recordUsage(usage, prepared.modelId, prepared.sessionTitle);
 					const charsPerToken = updateCharsPerToken(
 						prepared.totalRequestChars,
 						usage,

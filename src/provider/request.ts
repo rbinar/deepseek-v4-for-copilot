@@ -19,6 +19,17 @@ import type { ConversationSegment } from './segment';
 import { collectTrailingToolResultIds, prepareRequestTools } from './tools/request';
 import { resolveImageMessages, type VisionDescriber } from './vision';
 
+function extractSessionTitle(messages: readonly vscode.LanguageModelChatRequestMessage[]): string {
+	for (const msg of messages) {
+		if (msg.role !== vscode.LanguageModelChatMessageRole.User) continue;
+		const text = typeof msg.content === 'string' ? msg.content : '';
+		// Truncate to first 60 chars, strip newlines
+		const title = text.replace(/\n/g, ' ').trim().slice(0, 60);
+		return title || 'Untitled';
+	}
+	return 'Untitled';
+}
+
 export interface PreparedChatRequest {
 	client: DeepSeekClient;
 	request: DeepSeekRequest;
@@ -35,6 +46,8 @@ export interface PreparedChatRequest {
 	initialResponseNotice?: string;
 	/** The context size selected via the model-picker dropdown (if any). */
 	configuredContextSize: ContextSize;
+	/** Truncated title from the first user message in this request. */
+	sessionTitle: string;
 }
 
 export interface PrepareChatRequestOptions {
@@ -154,5 +167,6 @@ export async function prepareChatRequest({
 		visionMarkerTextChars: visionResolution.stats.markerVisionTextChars || undefined,
 		initialResponseNotice: visionResolution.initialResponseNotice,
 		configuredContextSize,
+		sessionTitle: extractSessionTitle(messages),
 	};
 }

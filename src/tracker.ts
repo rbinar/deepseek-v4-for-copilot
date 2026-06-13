@@ -18,6 +18,15 @@ export interface SessionRequest {
 	timestamp: number;
 	modelId: string;
 	modelName: string;
+	sessionTitle: string;
+	inputTokens: number;
+	outputTokens: number;
+	costUsd: number;
+}
+
+export interface SessionGroup {
+	title: string;
+	requests: SessionRequest[];
 	inputTokens: number;
 	outputTokens: number;
 	costUsd: number;
@@ -101,7 +110,7 @@ export function initTracker(ctx: vscode.ExtensionContext): void {
 	}
 }
 
-export function recordUsage(usage: DeepSeekUsage, modelId?: string): void {
+export function recordUsage(usage: DeepSeekUsage, modelId?: string, sessionTitle?: string): void {
 	// Detect date change mid-session
 	const d = today();
 	if (d !== date) {
@@ -126,6 +135,7 @@ export function recordUsage(usage: DeepSeekUsage, modelId?: string): void {
 		timestamp: Date.now(),
 		modelId: modelId ?? 'unknown',
 		modelName: findModelName(modelId ?? 'unknown'),
+		sessionTitle: sessionTitle ?? 'Untitled',
 		inputTokens: input,
 		outputTokens: output,
 		costUsd: cost,
@@ -149,4 +159,26 @@ export function getDailyHistory(): readonly DailyTokens[] {
 		all.push({ date, ...session });
 	}
 	return all;
+}
+
+export function getSessionGroups(): readonly SessionGroup[] {
+	const groups = new Map<string, SessionGroup>();
+	for (const req of requests) {
+		const existing = groups.get(req.sessionTitle);
+		if (existing) {
+			existing.requests.push(req);
+			existing.inputTokens += req.inputTokens;
+			existing.outputTokens += req.outputTokens;
+			existing.costUsd += req.costUsd;
+		} else {
+			groups.set(req.sessionTitle, {
+				title: req.sessionTitle,
+				requests: [req],
+				inputTokens: req.inputTokens,
+				outputTokens: req.outputTokens,
+				costUsd: req.costUsd,
+			});
+		}
+	}
+	return [...groups.values()];
 }
