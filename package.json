@@ -90,8 +90,7 @@
       "panel": [
         {
           "id": "deepseek-copilot",
-          "title": "DeepSeek",
-          "icon": "resources/deepseek-logo.svg"
+          "title": "DeepSeek"
         }
       ]
     },
