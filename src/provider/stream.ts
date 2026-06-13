@@ -4,17 +4,17 @@ import { logger } from '../logger';
 import { recordUsage } from '../tracker';
 import type { DeepSeekToolCall, DeepSeekUsage } from '../types';
 import {
-	observeCancellationToken,
-	type CacheDiagnosticsRun,
-	type ReplayMarkerReportTrigger,
+    observeCancellationToken,
+    type CacheDiagnosticsRun,
+    type ReplayMarkerReportTrigger,
 } from './debug';
-import { formatRequestLogLine, type RequestKind } from './routing';
 import {
-	createReplayMarkerPart,
-	hasReplayMarkerMetadata,
-	type ReplayMarkerMetadata,
+    createReplayMarkerPart,
+    hasReplayMarkerMetadata,
+    type ReplayMarkerMetadata,
 } from './replay';
 import type { PreparedChatRequest } from './request';
+import { formatRequestLogLine, type RequestKind } from './routing';
 
 interface ResponseStreamState {
 	accumulatedReasoning: string;

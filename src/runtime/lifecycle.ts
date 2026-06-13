@@ -5,7 +5,7 @@ import { EXTERNAL_URLS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
 import { DeepSeekChatProvider } from '../provider';
-import { getSessionTokens, getSessionRequests } from '../tracker';
+import { getSessionRequests, getSessionTokens, getDailyHistory, initTracker } from '../tracker';
 import { registerActionUrls } from './actions';
 import { registerCommands } from './commands';
 import { initializeDiagnostics } from './diagnostics';
@@ -16,6 +16,7 @@ let activeProvider: DeepSeekChatProvider | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	await initializeDiagnostics(context);
+	initTracker(context);
 	registerCommands(context);
 	registerActionUrls(context);
 
@@ -60,6 +61,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					const reqs = getSessionRequests();
 					webviewView.webview.postMessage({ type: 'requests', data: reqs });
 				}
+				if (msg === 'getHistory') {
+					const hist = getDailyHistory();
+					webviewView.webview.postMessage({ type: 'history', data: hist });
+				}
 				if (msg.type === 'openUrl' && msg.url) {
 					void vscode.env.openExternal(vscode.Uri.parse(msg.url));
 				}
@@ -78,6 +83,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				}
 				webviewView.webview.postMessage({ type: 'tokens', data: getSessionTokens() });
 				webviewView.webview.postMessage({ type: 'requests', data: getSessionRequests() });
+				webviewView.webview.postMessage({ type: 'history', data: getDailyHistory() });
 			})();
 		}
 	})();
@@ -184,10 +190,11 @@ function getPanelHtml(version: string): string {
 		<div id="balanceError"></div>
 	</div>
 	<div class="card">
-		<label>Session Tokens</label>
+		<label>Session Tokens <span onclick="toggleHistory()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-textLink-foreground);margin-left:8px">history</span></label>
 		<div id="tokenValue" class="value" onclick="toggleRequests()" title="Click for per-request detail">Loading...</div>
 		<div id="costValue"></div>
 		<div id="requestsTable"></div>
+		<div id="historyTable" style="display:none;margin-top:8px"></div>
 	</div>
 	<div class="card">
 		<label>Links</label>
@@ -201,11 +208,20 @@ function getPanelHtml(version: string): string {
 	<script>
 		const vscode = acquireVsCodeApi();
 		let requestsExpanded = false;
+		let historyExpanded = false;
 		let lastRequests = [];
+		let lastHistory = [];
 
 		function toggleRequests() {
+			if (historyExpanded) { toggleHistory(); }
 			requestsExpanded = !requestsExpanded;
 			renderRequests(lastRequests);
+		}
+
+		function toggleHistory() {
+			if (requestsExpanded) { toggleRequests(); }
+			historyExpanded = !historyExpanded;
+			renderHistory(lastHistory);
 		}
 
 		function refresh() {
@@ -214,6 +230,7 @@ function getPanelHtml(version: string): string {
 			vscode.postMessage('refreshBalance');
 			vscode.postMessage('getTokens');
 			vscode.postMessage('getRequests');
+			vscode.postMessage('getHistory');
 		}
 		function openUrl(url) { vscode.postMessage({ type: 'openUrl', url }); }
 
@@ -241,6 +258,36 @@ function getPanelHtml(version: string): string {
 		}
 
 		function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+		function renderHistory(hist) {
+			lastHistory = hist;
+			const table = document.getElementById('historyTable');
+			if (!hist || hist.length <= 1 || !historyExpanded) {
+				table.style.display = 'none';
+				table.innerHTML = '';
+				return;
+			}
+			table.style.display = 'block';
+			// Show past days (exclude today)
+			const past = hist.filter(h => h.date !== hist[hist.length-1]?.date || hist.length === 1);
+			if (past.length === 0) {
+				table.style.display = 'none';
+				table.innerHTML = '';
+				return;
+			}
+			let html = '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr><th style="text-align:left;padding:3px 6px;border-bottom:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);font-weight:500">Date</th><th style="text-align:left;padding:3px 6px;border-bottom:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);font-weight:500">Tokens</th><th style="text-align:left;padding:3px 6px;border-bottom:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);font-weight:500">Cost</th></tr></thead><tbody>';
+			for (let i = past.length - 1; i >= 0; i--) {
+				const h = past[i];
+				const total = h.inputTokens + h.outputTokens;
+				html += '<tr>';
+				html += '<td style="padding:3px 6px;border-bottom:1px solid var(--vscode-panel-border)">' + esc(h.date) + '</td>';
+				html += '<td style="padding:3px 6px;border-bottom:1px solid var(--vscode-panel-border);font-family:var(--vscode-editor-font-family)">' + total.toLocaleString() + ' <span style="color:var(--vscode-descriptionForeground)">(' + h.requestCount + ' req)</span></td>';
+				html += '<td style="padding:3px 6px;border-bottom:1px solid var(--vscode-panel-border);font-family:var(--vscode-editor-font-family)">$' + h.costUsd.toFixed(4) + '</td>';
+				html += '</tr>';
+			}
+			html += '</tbody></table>';
+			table.innerHTML = html;
+		}
 
 		window.addEventListener('message', e => {
 			const msg = e.data;
@@ -297,9 +344,13 @@ function getPanelHtml(version: string): string {
 			if (msg.type === 'requests') {
 				renderRequests(msg.data);
 			}
+			if (msg.type === 'history') {
+				renderHistory(msg.data);
+			}
 		});
 		vscode.postMessage('getTokens');
 		vscode.postMessage('getRequests');
+		vscode.postMessage('getHistory');
 	</script>
 </body>
 </html>`;

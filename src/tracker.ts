@@ -1,9 +1,10 @@
+import vscode from 'vscode';
 import { MODELS } from './consts';
 import type { DeepSeekUsage, ModelDefinition } from './types';
 
 /**
- * Lightweight in-memory session token tracker.
- * Accumulates across requests within a single VS Code session.
+ * Persistent session token tracker.
+ * Survives VS Code restarts via globalState. Resets daily.
  */
 export interface SessionTokens {
 	inputTokens: number;
@@ -22,14 +23,31 @@ export interface SessionRequest {
 	costUsd: number;
 }
 
-const session: SessionTokens = {
+export interface DailyTokens extends SessionTokens {
+	date: string; // YYYY-MM-DD
+}
+
+interface PersistedState {
+	date: string;
+	tokens: SessionTokens;
+	requests: SessionRequest[];
+	history: DailyTokens[];
+}
+
+const STORAGE_KEY = 'deepseek-copilot.tokenTracker';
+
+const emptySession = (): SessionTokens => ({
 	inputTokens: 0,
 	outputTokens: 0,
 	requestCount: 0,
 	costUsd: 0,
-};
+});
 
-const requests: SessionRequest[] = [];
+let context: vscode.ExtensionContext | undefined;
+let session: SessionTokens = emptySession();
+let requests: SessionRequest[] = [];
+let history: DailyTokens[] = [];
+let date: string = today();
 
 // Build pricing lookup from MODELS const
 const pricingMap = new Map<string, { inputPerM: number; outputPerM: number }>();
@@ -38,6 +56,10 @@ for (const m of MODELS as ModelDefinition[]) {
 	if (usd) {
 		pricingMap.set(m.id, { inputPerM: usd.cacheMissInput, outputPerM: usd.output });
 	}
+}
+
+function today(): string {
+	return new Date().toISOString().slice(0, 10);
 }
 
 function calcCost(inputTokens: number, outputTokens: number, modelId: string): number {
@@ -51,7 +73,46 @@ function findModelName(modelId: string): string {
 	return m?.name ?? modelId;
 }
 
+function persist(): void {
+	if (!context) return;
+	const state: PersistedState = { date, tokens: { ...session }, requests: [...requests], history: [...history] };
+	void context.globalState.update(STORAGE_KEY, state);
+}
+
+export function initTracker(ctx: vscode.ExtensionContext): void {
+	context = ctx;
+	const saved = ctx.globalState.get<PersistedState>(STORAGE_KEY);
+	if (saved?.date === today()) {
+		session = saved.tokens ?? emptySession();
+		requests = saved.requests ?? [];
+		history = saved.history ?? [];
+		date = saved.date ?? today();
+	} else {
+		// New day: save yesterday to history
+		if (saved && (saved.tokens?.requestCount ?? 0) > 0) {
+			history = [...(saved.history ?? []), { date: saved.date, ...saved.tokens }];
+		} else if (saved?.history) {
+			history = saved.history;
+		}
+		session = emptySession();
+		requests = [];
+		date = today();
+		persist();
+	}
+}
+
 export function recordUsage(usage: DeepSeekUsage, modelId?: string): void {
+	// Detect date change mid-session
+	const d = today();
+	if (d !== date) {
+		if (session.requestCount > 0) {
+			history.push({ date, ...session });
+		}
+		session = emptySession();
+		requests = [];
+		date = d;
+	}
+
 	const input = usage.prompt_tokens ?? 0;
 	const output = usage.completion_tokens ?? 0;
 	const cost = modelId ? calcCost(input, output, modelId) : 0;
@@ -69,6 +130,8 @@ export function recordUsage(usage: DeepSeekUsage, modelId?: string): void {
 		outputTokens: output,
 		costUsd: cost,
 	});
+
+	persist();
 }
 
 export function getSessionTokens(): Readonly<SessionTokens> {
@@ -77,4 +140,13 @@ export function getSessionTokens(): Readonly<SessionTokens> {
 
 export function getSessionRequests(): readonly SessionRequest[] {
 	return requests;
+}
+
+export function getDailyHistory(): readonly DailyTokens[] {
+	// Include today if there's activity
+	const all = [...history];
+	if (session.requestCount > 0) {
+		all.push({ date, ...session });
+	}
+	return all;
 }
