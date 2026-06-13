@@ -81,7 +81,7 @@
       "deepseek-copilot": [
         {
           "id": "deepseek-copilot.panelView",
-          "name": "Overview",
+          "name": "DeepSeek",
           "type": "webview"
         }
       ]
@@ -184,6 +184,12 @@
           "editPresentation": "multilineText",
           "default": "Describe all image attachments in this message.\n\nIf there is one image, describe it directly.\nIf there are multiple images:\n1. Describe each image separately, preserving their order.\n2. Then provide a combined description explaining the overall context and relationships across the images.\n\nReturn one concise factual description suitable for inserting into a text-only chat prompt. Include visible text, objects, UI elements, people, and relevant context. Do not invent details.",
           "markdownDescription": "%deepseek-copilot.config.visionPrompt.description%"
+        },
+        "deepseek-copilot.contextSize": {
+          "type": "number",
+          "default": 1000000,
+          "enum": [200000, 1000000],
+          "description": "Context window size (tokens). 200K or 1M."
         },
         "deepseek-copilot.debugMode": {
           "type": "string",

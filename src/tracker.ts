@@ -18,7 +18,11 @@ export interface SessionRequest {
 	timestamp: number;
 	modelId: string;
 	modelName: string;
+	/** Stable session identifier used for grouping. */
+	sessionId: string;
 	sessionTitle: string;
+	/** Raw text used for title extraction (debug). */
+	rawTitleText: string;
 	inputTokens: number;
 	outputTokens: number;
 	costUsd: number;
@@ -110,7 +114,17 @@ export function initTracker(ctx: vscode.ExtensionContext): void {
 	}
 }
 
-export function recordUsage(usage: DeepSeekUsage, modelId?: string, sessionTitle?: string): void {
+export function clearTracker(): void {
+	session = emptySession();
+	requests = [];
+	history = [];
+	date = today();
+	if (context) {
+		void context.globalState.update(STORAGE_KEY, undefined);
+	}
+}
+
+export function recordUsage(usage: DeepSeekUsage, modelId?: string, sessionTitle?: string, rawTitleText?: string, sessionId?: string): void {
 	// Detect date change mid-session
 	const d = today();
 	if (d !== date) {
@@ -135,7 +149,9 @@ export function recordUsage(usage: DeepSeekUsage, modelId?: string, sessionTitle
 		timestamp: Date.now(),
 		modelId: modelId ?? 'unknown',
 		modelName: findModelName(modelId ?? 'unknown'),
+		sessionId: sessionId ?? sessionTitle ?? 'Untitled',
 		sessionTitle: sessionTitle ?? 'Untitled',
+		rawTitleText: rawTitleText ?? '',
 		inputTokens: input,
 		outputTokens: output,
 		costUsd: cost,
@@ -164,14 +180,19 @@ export function getDailyHistory(): readonly DailyTokens[] {
 export function getSessionGroups(): readonly SessionGroup[] {
 	const groups = new Map<string, SessionGroup>();
 	for (const req of requests) {
-		const existing = groups.get(req.sessionTitle);
+		const key = req.sessionId || req.sessionTitle;
+		const existing = groups.get(key);
 		if (existing) {
 			existing.requests.push(req);
 			existing.inputTokens += req.inputTokens;
 			existing.outputTokens += req.outputTokens;
 			existing.costUsd += req.costUsd;
+			// Use the most informative (latest non-"Untitled") title for the group.
+			if (req.sessionTitle && req.sessionTitle !== 'Untitled') {
+				existing.title = req.sessionTitle;
+			}
 		} else {
-			groups.set(req.sessionTitle, {
+			groups.set(key, {
 				title: req.sessionTitle,
 				requests: [req],
 				inputTokens: req.inputTokens,

@@ -5,7 +5,8 @@ import { EXTERNAL_URLS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
 import { DeepSeekChatProvider } from '../provider';
-import { getSessionRequests, getSessionTokens, getDailyHistory, getSessionGroups, initTracker } from '../tracker';
+import { initSession } from '../session';
+import { clearTracker, getDailyHistory, getSessionGroups, getSessionRequests, getSessionTokens, initTracker } from '../tracker';
 import { registerActionUrls } from './actions';
 import { registerCommands } from './commands';
 import { initializeDiagnostics } from './diagnostics';
@@ -17,6 +18,7 @@ let activeProvider: DeepSeekChatProvider | undefined;
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	await initializeDiagnostics(context);
 	initTracker(context);
+	initSession(context);
 	registerCommands(context);
 	registerActionUrls(context);
 
@@ -71,6 +73,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				}
 				if (msg.type === 'openUrl' && msg.url) {
 					void vscode.env.openExternal(vscode.Uri.parse(msg.url));
+				}
+				if (msg === 'clearData') {
+					clearTracker();
+					webviewView.webview.postMessage({ type: 'tokens', data: getSessionTokens() });
+					webviewView.webview.postMessage({ type: 'requests', data: getSessionRequests() });
+					webviewView.webview.postMessage({ type: 'history', data: getDailyHistory() });
+					webviewView.webview.postMessage({ type: 'sessions', data: getSessionGroups() });
 				}
 			});
 
@@ -152,7 +161,7 @@ function getPanelHtml(version: string): string {
 		}
 		.card label { display: block; font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
 		.card .value { font-size: 13px; }
-		.card .value.balance { font-size: 16px; font-weight: 600; color: rgb(96, 179, 254); }
+		.card .value.balance { font-size: 16px; font-weight: 600; color: rgb(247, 173, 49); }
 		.card .value.balance.low { color: var(--vscode-charts-orange); }
 		.card .value.balance.empty { color: var(--vscode-errorForeground); }
 		button {
@@ -185,6 +194,17 @@ function getPanelHtml(version: string): string {
 		#requestsTable th { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); font-weight: 500; }
 		#requestsTable td { padding: 3px 6px; border-bottom: 1px solid var(--vscode-panel-border); font-family: var(--vscode-editor-font-family); }
 		#requestsTable tr:hover td { background: var(--vscode-list-hoverBackground); }
+		.req-card {
+			background: var(--vscode-input-background);
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 4px;
+			padding: 6px 8px;
+			margin-bottom: 4px;
+			font-size: 11px;
+		}
+		.req-card .req-model { font-weight: 500; margin-bottom: 2px; }
+		.req-card .req-detail { font-family: var(--vscode-editor-font-family); color: var(--vscode-descriptionForeground); }
+		.req-card .req-cost { color: rgb(255, 161, 10); }
 		.footer { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 12px; text-align: center; }
 	</style>
 </head>
@@ -195,8 +215,8 @@ function getPanelHtml(version: string): string {
 		<div id="balanceError"></div>
 	</div>
 	<div class="card">
-		<label>Session Tokens <span onclick="toggleHistory()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-textLink-foreground);margin-left:8px">history</span><span onclick="toggleSessions()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-textLink-foreground);margin-left:8px">sessions</span></label>
-		<div id="tokenValue" class="value" onclick="toggleRequests()" title="Click for per-request detail">Loading...</div>
+		<label>Session Tokens <span onclick="toggleHistory()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-textLink-foreground);margin-left:8px">history</span><span onclick="toggleSessions()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-textLink-foreground);margin-left:8px">sessions</span><span onclick="clearAll()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-errorForeground);margin-left:8px">reset</span></label>
+		<div id="tokenValue" class="value" onclick="toggleRequests()" title="Click to show/hide per-request list">Loading...</div>
 		<div id="costValue"></div>
 		<div id="requestsTable"></div>
 		<div id="historyTable" style="display:none;margin-top:8px"></div>
@@ -251,28 +271,43 @@ function getPanelHtml(version: string): string {
 			vscode.postMessage('getSessions');
 		}
 		function openUrl(url) { vscode.postMessage({ type: 'openUrl', url }); }
+		function clearAll() {
+			vscode.postMessage('clearData');
+			// Reset local UI state
+			requestsExpanded = false;
+			historyExpanded = false;
+			sessionsExpanded = false;
+			document.getElementById('requestsTable').style.display = 'none';
+			document.getElementById('historyTable').style.display = 'none';
+			document.getElementById('sessionsTable').style.display = 'none';
+			lastRequests = [];
+			lastHistory = [];
+			lastSessions = [];
+		}
 
 		function renderRequests(reqs) {
 			lastRequests = reqs;
-			const table = document.getElementById('requestsTable');
+			const container = document.getElementById('requestsTable');
 			if (!reqs || reqs.length === 0 || !requestsExpanded) {
-				table.style.display = 'none';
-				table.innerHTML = '';
+				container.style.display = 'none';
+				container.innerHTML = '';
 				return;
 			}
-			table.style.display = 'block';
-			let html = '<table><thead><tr><th>Model</th><th>Input</th><th>Output</th><th>Cost</th></tr></thead><tbody>';
+			container.style.display = 'block';
+			let html = '';
+			// Show newest first, vertically stacked as cards
 			for (let i = reqs.length - 1; i >= 0; i--) {
 				const r = reqs[i];
-				html += '<tr>';
-				html += '<td>' + esc(r.modelName) + '</td>';
-				html += '<td>' + r.inputTokens.toLocaleString() + '</td>';
-				html += '<td>' + r.outputTokens.toLocaleString() + '</td>';
-				html += '<td>$' + r.costUsd.toFixed(4) + '</td>';
-				html += '</tr>';
+				html += '<div class="req-card">';
+				html += '<div class="req-model">' + esc(r.modelName) + '</div>';
+				html += '<div class="req-detail">';
+				html += r.inputTokens.toLocaleString() + ' in · ';
+				html += r.outputTokens.toLocaleString() + ' out';
+				html += ' <span class="req-cost">$' + r.costUsd.toFixed(4) + '</span>';
+				html += '</div>';
+				html += '</div>';
 			}
-			html += '</tbody></table>';
-			table.innerHTML = html;
+			container.innerHTML = html;
 		}
 
 		function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -333,16 +368,43 @@ function getPanelHtml(version: string): string {
 			}
 			table.style.display = 'block';
 			let html = '';
-			for (const g of groups) {
+			for (let gi = 0; gi < groups.length; gi++) {
+				const g = groups[gi];
 				const total = g.inputTokens + g.outputTokens;
-				html += '<div style="margin-bottom:6px;padding:6px;background:var(--vscode-input-background);border-radius:4px;border:1px solid var(--vscode-panel-border)">';
-				html += '<div style="font-size:11px;font-weight:500;margin-bottom:3px">' + esc(g.title) + '</div>';
+				const detailId = 'sessDetail' + gi;
+				html += '<div class="sessCard" data-target="' + detailId + '" style="margin-bottom:6px;padding:6px;background:var(--vscode-input-background);border-radius:4px;border:1px solid var(--vscode-panel-border);cursor:pointer">';
+				html += '<div style="font-size:11px;font-weight:500;margin-bottom:3px">' + esc(g.title || 'Untitled') + '</div>';
 				html += '<div style="font-size:11px;font-family:var(--vscode-editor-font-family);color:var(--vscode-descriptionForeground)">';
 				html += total.toLocaleString() + ' tokens · ' + g.requests.length + ' requests · <span style="color:rgb(255,161,10)">$' + g.costUsd.toFixed(4) + '</span>';
 				html += '</div>';
+				// Hidden per-request table
+				html += '<div id="' + detailId + '" style="display:none;margin-top:6px">';
+				html += '<table style="width:100%;border-collapse:collapse;font-size:10px">';
+				html += '<thead><tr style="color:var(--vscode-descriptionForeground)"><th style="text-align:left;padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-weight:500">Model</th><th style="text-align:left;padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-weight:500">In</th><th style="text-align:left;padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-weight:500">Out</th><th style="text-align:left;padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-weight:500">Cost</th></tr></thead><tbody>';
+				for (let ri = g.requests.length - 1; ri >= 0; ri--) {
+					const r = g.requests[ri];
+					html += '<tr>';
+					html += '<td style="padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border)">' + esc(r.modelName) + '</td>';
+					html += '<td style="padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-family:var(--vscode-editor-font-family)">' + r.inputTokens.toLocaleString() + '</td>';
+					html += '<td style="padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-family:var(--vscode-editor-font-family)">' + r.outputTokens.toLocaleString() + '</td>';
+					html += '<td style="padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-family:var(--vscode-editor-font-family)">$' + r.costUsd.toFixed(4) + '</td>';
+					html += '</tr>';
+				}
+				html += '</tbody></table></div>';
 				html += '</div>';
 			}
 			table.innerHTML = html;
+			// Click-to-expand per-session requests
+			const cards = table.querySelectorAll('.sessCard');
+			for (let i = 0; i < cards.length; i++) {
+				cards[i].addEventListener('click', function(e) {
+					// Don't toggle if user clicked a link/button inside
+					if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
+					const id = this.getAttribute('data-target');
+					const el = document.getElementById(id);
+					if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+				});
+			}
 		}
 
 		window.addEventListener('message', e => {
