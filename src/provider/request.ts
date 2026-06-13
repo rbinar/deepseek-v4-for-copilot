@@ -13,10 +13,17 @@ import {
     type CacheDiagnosticsRecorder,
     type CacheDiagnosticsRun,
 } from './debug';
-import { getConfiguredContextSize, getConfiguredThinkingEffort, type ContextSize, type ModelConfigurationOptions } from './models';
+import {
+	getConfiguredContextSize,
+	getConfiguredThinkingEffort,
+	type ContextSize,
+	type ModelConfigurationOptions,
+	type ThinkingEffort,
+} from './models';
 import type { ReplayMarkerMetadata } from './replay';
 import { classifyDeepSeekRequest, shouldForceThinkingNone, type RequestKind } from './routing';
 import type { ConversationSegment } from './segment';
+import { toDeepSeekNativeReasoningRequest } from './thinking';
 import { collectTrailingToolResultIds, prepareRequestTools } from './tools/request';
 import { resolveImageMessages, type VisionDescriber } from './vision';
 
@@ -99,10 +106,13 @@ function extractSessionTitle(messages: readonly vscode.LanguageModelChatRequestM
 
 export interface PreparedChatRequest {
 	client: DeepSeekClient;
+	baseUrl: string;
+	globalStorageUri: vscode.Uri;
 	request: DeepSeekRequest;
 	/** The VS Code model ID (e.g. "deepseek-v4-pro"). */
 	modelId: string;
 	isThinkingModel: boolean;
+	thinkingEffort: ThinkingEffort;
 	totalRequestChars: number;
 	trailingToolResultIds: string[];
 	cacheDiagnostics: CacheDiagnosticsRun;
@@ -182,17 +192,9 @@ export async function prepareChatRequest({
 	const forceNoneThinking =
 		shouldForceThinkingNone(requestKind) && isOfficialDeepSeekBaseUrl(baseUrl);
 	const thinkingEffort = forceNoneThinking ? 'none' : configuredThinkingEffort;
-	const request: DeepSeekRequest = {
-		...baseRequest,
-		...(isThinkingModel
-			? {
-					thinking: {
-						type: thinkingEffort === 'none' ? ('disabled' as const) : ('enabled' as const),
-					},
-					...(thinkingEffort === 'none' ? {} : { reasoning_effort: thinkingEffort }),
-				}
-			: {}),
-	};
+	const request: DeepSeekRequest = isThinkingModel
+		? toDeepSeekNativeReasoningRequest(baseRequest, thinkingEffort)
+		: baseRequest;
 	dumpDeepSeekRequest(request, {
 		globalStorageUri,
 		segment,
@@ -226,9 +228,12 @@ export async function prepareChatRequest({
 
 	return {
 		client,
+		baseUrl,
+		globalStorageUri,
 		request,
 		modelId: modelInfo.id,
 		isThinkingModel,
+		thinkingEffort,
 		totalRequestChars,
 		trailingToolResultIds: collectTrailingToolResultIds(deepseekMessages),
 		cacheDiagnostics: diagnosticsRun,
