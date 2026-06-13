@@ -22,6 +22,8 @@ import { resolveImageMessages, type VisionDescriber } from './vision';
 export interface PreparedChatRequest {
 	client: DeepSeekClient;
 	request: DeepSeekRequest;
+	/** The VS Code model ID (e.g. "deepseek-v4-pro"). */
+	modelId: string;
 	isThinkingModel: boolean;
 	totalRequestChars: number;
 	trailingToolResultIds: string[];
@@ -141,6 +143,7 @@ export async function prepareChatRequest({
 	return {
 		client,
 		request,
+		modelId: modelInfo.id,
 		isThinkingModel,
 		totalRequestChars,
 		trailingToolResultIds: collectTrailingToolResultIds(deepseekMessages),

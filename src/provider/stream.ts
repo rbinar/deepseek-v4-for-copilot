@@ -1,6 +1,7 @@
 import vscode from 'vscode';
 import { createUserFacingError } from '../client';
 import { logger } from '../logger';
+import { recordUsage } from '../tracker';
 import type { DeepSeekToolCall, DeepSeekUsage } from '../types';
 import {
 	observeCancellationToken,
@@ -82,6 +83,7 @@ export function streamChatCompletion({
 				},
 
 				onUsage: (usage) => {
+					recordUsage(usage, prepared.modelId);
 					const charsPerToken = updateCharsPerToken(
 						prepared.totalRequestChars,
 						usage,
