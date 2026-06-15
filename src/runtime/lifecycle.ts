@@ -5,8 +5,7 @@ import { EXTERNAL_URLS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
 import { DeepSeekChatProvider } from '../provider';
-import { initSession } from '../session';
-import { clearTracker, getDailyHistory, getSessionGroups, getSessionRequests, getSessionTokens, initTracker } from '../tracker';
+import { clearTracker, getDailyHistory, getSessionRequests, getSessionTokens, initTracker } from '../tracker';
 import { registerActionUrls } from './actions';
 import { registerCommands } from './commands';
 import { initializeDiagnostics } from './diagnostics';
@@ -18,7 +17,6 @@ let activeProvider: DeepSeekChatProvider | undefined;
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	await initializeDiagnostics(context);
 	initTracker(context);
-	initSession(context);
 	registerCommands(context);
 	registerActionUrls(context);
 
@@ -67,10 +65,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					const hist = getDailyHistory();
 					webviewView.webview.postMessage({ type: 'history', data: hist });
 				}
-				if (msg === 'getSessions') {
-					const groups = getSessionGroups();
-					webviewView.webview.postMessage({ type: 'sessions', data: groups });
-				}
 				if (msg.type === 'openUrl' && msg.url) {
 					void vscode.env.openExternal(vscode.Uri.parse(msg.url));
 				}
@@ -79,7 +73,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					webviewView.webview.postMessage({ type: 'tokens', data: getSessionTokens() });
 					webviewView.webview.postMessage({ type: 'requests', data: getSessionRequests() });
 					webviewView.webview.postMessage({ type: 'history', data: getDailyHistory() });
-					webviewView.webview.postMessage({ type: 'sessions', data: getSessionGroups() });
 				}
 			});
 
@@ -97,7 +90,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				webviewView.webview.postMessage({ type: 'tokens', data: getSessionTokens() });
 				webviewView.webview.postMessage({ type: 'requests', data: getSessionRequests() });
 				webviewView.webview.postMessage({ type: 'history', data: getDailyHistory() });
-				webviewView.webview.postMessage({ type: 'sessions', data: getSessionGroups() });
 			})();
 		}
 	})();
@@ -215,12 +207,11 @@ function getPanelHtml(version: string): string {
 		<div id="balanceError"></div>
 	</div>
 	<div class="card">
-		<label>Session Tokens <span onclick="toggleHistory()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-textLink-foreground);margin-left:8px">history</span><span onclick="toggleSessions()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-textLink-foreground);margin-left:8px">sessions</span><span onclick="clearAll()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-errorForeground);margin-left:8px">reset</span></label>
+		<label>Session Tokens <span onclick="toggleHistory()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-textLink-foreground);margin-left:8px">history</span><span onclick="clearAll()" style="font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--vscode-errorForeground);margin-left:8px">reset</span></label>
 		<div id="tokenValue" class="value" onclick="toggleRequests()" title="Click to show/hide per-request list">Loading...</div>
 		<div id="costValue"></div>
 		<div id="requestsTable"></div>
 		<div id="historyTable" style="display:none;margin-top:8px"></div>
-		<div id="sessionsTable" style="display:none;margin-top:8px"></div>
 	</div>
 	<div class="card">
 		<label>Links</label>
@@ -235,30 +226,19 @@ function getPanelHtml(version: string): string {
 		const vscode = acquireVsCodeApi();
 		let requestsExpanded = false;
 		let historyExpanded = false;
-		let sessionsExpanded = false;
 		let lastRequests = [];
 		let lastHistory = [];
-		let lastSessions = [];
 
 		function toggleRequests() {
 			if (historyExpanded) { toggleHistory(); }
-			if (sessionsExpanded) { toggleSessions(); }
 			requestsExpanded = !requestsExpanded;
 			renderRequests(lastRequests);
 		}
 
 		function toggleHistory() {
 			if (requestsExpanded) { toggleRequests(); }
-			if (sessionsExpanded) { toggleSessions(); }
 			historyExpanded = !historyExpanded;
 			renderHistory(lastHistory);
-		}
-
-		function toggleSessions() {
-			if (requestsExpanded) { toggleRequests(); }
-			if (historyExpanded) { toggleHistory(); }
-			sessionsExpanded = !sessionsExpanded;
-			renderSessions(lastSessions);
 		}
 
 		function refresh() {
@@ -268,7 +248,6 @@ function getPanelHtml(version: string): string {
 			vscode.postMessage('getTokens');
 			vscode.postMessage('getRequests');
 			vscode.postMessage('getHistory');
-			vscode.postMessage('getSessions');
 		}
 		function openUrl(url) { vscode.postMessage({ type: 'openUrl', url }); }
 		function clearAll() {
@@ -276,13 +255,10 @@ function getPanelHtml(version: string): string {
 			// Reset local UI state
 			requestsExpanded = false;
 			historyExpanded = false;
-			sessionsExpanded = false;
 			document.getElementById('requestsTable').style.display = 'none';
 			document.getElementById('historyTable').style.display = 'none';
-			document.getElementById('sessionsTable').style.display = 'none';
 			lastRequests = [];
 			lastHistory = [];
-			lastSessions = [];
 		}
 
 		function renderRequests(reqs) {
@@ -353,60 +329,6 @@ function getPanelHtml(version: string): string {
 			return new Date().toISOString().slice(0, 10);
 		}
 
-		function renderSessions(groups) {
-			lastSessions = groups;
-			const table = document.getElementById('sessionsTable');
-			if (!sessionsExpanded) {
-				table.style.display = 'none';
-				table.innerHTML = '';
-				return;
-			}
-			if (!groups || groups.length === 0) {
-				table.style.display = 'block';
-				table.innerHTML = '<div style="font-size:11px;color:var(--vscode-descriptionForeground);padding:4px 0">No sessions yet</div>';
-				return;
-			}
-			table.style.display = 'block';
-			let html = '';
-			for (let gi = 0; gi < groups.length; gi++) {
-				const g = groups[gi];
-				const total = g.inputTokens + g.outputTokens;
-				const detailId = 'sessDetail' + gi;
-				html += '<div class="sessCard" data-target="' + detailId + '" style="margin-bottom:6px;padding:6px;background:var(--vscode-input-background);border-radius:4px;border:1px solid var(--vscode-panel-border);cursor:pointer">';
-				html += '<div style="font-size:11px;font-weight:500;margin-bottom:3px">' + esc(g.title || 'Untitled') + '</div>';
-				html += '<div style="font-size:11px;font-family:var(--vscode-editor-font-family);color:var(--vscode-descriptionForeground)">';
-				html += total.toLocaleString() + ' tokens · ' + g.requests.length + ' requests · <span style="color:rgb(255,161,10)">$' + g.costUsd.toFixed(4) + '</span>';
-				html += '</div>';
-				// Hidden per-request table
-				html += '<div id="' + detailId + '" style="display:none;margin-top:6px">';
-				html += '<table style="width:100%;border-collapse:collapse;font-size:10px">';
-				html += '<thead><tr style="color:var(--vscode-descriptionForeground)"><th style="text-align:left;padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-weight:500">Model</th><th style="text-align:left;padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-weight:500">In</th><th style="text-align:left;padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-weight:500">Out</th><th style="text-align:left;padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-weight:500">Cost</th></tr></thead><tbody>';
-				for (let ri = g.requests.length - 1; ri >= 0; ri--) {
-					const r = g.requests[ri];
-					html += '<tr>';
-					html += '<td style="padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border)">' + esc(r.modelName) + '</td>';
-					html += '<td style="padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-family:var(--vscode-editor-font-family)">' + r.inputTokens.toLocaleString() + '</td>';
-					html += '<td style="padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-family:var(--vscode-editor-font-family)">' + r.outputTokens.toLocaleString() + '</td>';
-					html += '<td style="padding:2px 4px;border-bottom:1px solid var(--vscode-panel-border);font-family:var(--vscode-editor-font-family)">$' + r.costUsd.toFixed(4) + '</td>';
-					html += '</tr>';
-				}
-				html += '</tbody></table></div>';
-				html += '</div>';
-			}
-			table.innerHTML = html;
-			// Click-to-expand per-session requests
-			const cards = table.querySelectorAll('.sessCard');
-			for (let i = 0; i < cards.length; i++) {
-				cards[i].addEventListener('click', function(e) {
-					// Don't toggle if user clicked a link/button inside
-					if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
-					const id = this.getAttribute('data-target');
-					const el = document.getElementById(id);
-					if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
-				});
-			}
-		}
-
 		window.addEventListener('message', e => {
 			const msg = e.data;
 			if (msg.type === 'balance') {
@@ -465,14 +387,10 @@ function getPanelHtml(version: string): string {
 			if (msg.type === 'history') {
 				renderHistory(msg.data);
 			}
-			if (msg.type === 'sessions') {
-				renderSessions(msg.data);
-			}
 		});
 		vscode.postMessage('getTokens');
 		vscode.postMessage('getRequests');
 		vscode.postMessage('getHistory');
-		vscode.postMessage('getSessions');
 	</script>
 </body>
 </html>`;

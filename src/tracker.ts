@@ -18,23 +18,14 @@ export interface SessionRequest {
 	timestamp: number;
 	modelId: string;
 	modelName: string;
-	/** Stable session identifier used for grouping. */
-	sessionId: string;
-	sessionTitle: string;
-	/** Raw text used for title extraction (debug). */
-	rawTitleText: string;
 	inputTokens: number;
 	outputTokens: number;
 	costUsd: number;
 }
 
-export interface SessionGroup {
-	title: string;
-	requests: SessionRequest[];
-	inputTokens: number;
-	outputTokens: number;
-	costUsd: number;
-}
+// Conversation-level grouping intentionally omitted: it would require a stable
+// chat/session id from the provider API. Revisit when microsoft/vscode#305853 lands
+// and exposes session identity to provideLanguageModelChatResponse().
 
 export interface DailyTokens extends SessionTokens {
 	date: string; // YYYY-MM-DD
@@ -124,7 +115,7 @@ export function clearTracker(): void {
 	}
 }
 
-export function recordUsage(usage: DeepSeekUsage, modelId?: string, sessionTitle?: string, rawTitleText?: string, sessionId?: string): void {
+export function recordUsage(usage: DeepSeekUsage, modelId?: string): void {
 	// Detect date change mid-session
 	const d = today();
 	if (d !== date) {
@@ -149,9 +140,6 @@ export function recordUsage(usage: DeepSeekUsage, modelId?: string, sessionTitle
 		timestamp: Date.now(),
 		modelId: modelId ?? 'unknown',
 		modelName: findModelName(modelId ?? 'unknown'),
-		sessionId: sessionId ?? sessionTitle ?? 'Untitled',
-		sessionTitle: sessionTitle ?? 'Untitled',
-		rawTitleText: rawTitleText ?? '',
 		inputTokens: input,
 		outputTokens: output,
 		costUsd: cost,
@@ -177,24 +165,29 @@ export function getDailyHistory(): readonly DailyTokens[] {
 	return all;
 }
 
-export function getSessionGroups(): readonly SessionGroup[] {
-	const groups = new Map<string, SessionGroup>();
+export interface ModelUsage {
+	modelId: string;
+	modelName: string;
+	requestCount: number;
+	inputTokens: number;
+	outputTokens: number;
+	costUsd: number;
+}
+
+export function getUsageByModel(): readonly ModelUsage[] {
+	const groups = new Map<string, ModelUsage>();
 	for (const req of requests) {
-		const key = req.sessionId || req.sessionTitle;
-		const existing = groups.get(key);
+		const existing = groups.get(req.modelId);
 		if (existing) {
-			existing.requests.push(req);
+			existing.requestCount += 1;
 			existing.inputTokens += req.inputTokens;
 			existing.outputTokens += req.outputTokens;
 			existing.costUsd += req.costUsd;
-			// Use the most informative (latest non-"Untitled") title for the group.
-			if (req.sessionTitle && req.sessionTitle !== 'Untitled') {
-				existing.title = req.sessionTitle;
-			}
 		} else {
-			groups.set(key, {
-				title: req.sessionTitle,
-				requests: [req],
+			groups.set(req.modelId, {
+				modelId: req.modelId,
+				modelName: req.modelName,
+				requestCount: 1,
 				inputTokens: req.inputTokens,
 				outputTokens: req.outputTokens,
 				costUsd: req.costUsd,

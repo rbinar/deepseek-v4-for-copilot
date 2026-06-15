@@ -2,8 +2,9 @@ import vscode from 'vscode';
 import { createUserFacingError } from '../client';
 import { logger } from '../logger';
 import { recordUsage } from '../tracker';
-import type { DeepSeekToolCall, DeepSeekUsage } from '../types';
+import type { DeepSeekToolCall, DeepSeekUsage, StreamCallbacks } from '../types';
 import {
+    createThinkingCompatibilityRetryDump,
     observeCancellationToken,
     type CacheDiagnosticsRun,
     type ReplayMarkerReportTrigger,
@@ -15,6 +16,10 @@ import {
 } from './replay';
 import type { PreparedChatRequest } from './request';
 import { formatRequestLogLine, type RequestKind } from './routing';
+import {
+    createThinkingCompatibilityPrecheck,
+    type ThinkingCompatibilityPrecheck,
+} from './thinking';
 
 interface ResponseStreamState {
 	accumulatedReasoning: string;
@@ -92,20 +97,25 @@ export function streamChatCompletion({
 		},
 	};
 
-				onUsage: (usage) => {
-					recordUsage(usage, prepared.modelId, prepared.sessionTitle, prepared.sessionRawText, prepared.sessionId);
-					const charsPerToken = updateCharsPerToken(
-						prepared.totalRequestChars,
-						usage,
-						getCharsPerToken(),
-					);
-					setCharsPerToken(charsPerToken);
-					prepared.cacheDiagnostics.onUsage(usage, charsPerToken);
-					reportCopilotContextUsage(progress, usage, prepared.requestKind);
-				},
+	return streamWithThinkingCompatibility(
+		prepared,
+		{
+			...callbacks,
+			onUsage: (usage: DeepSeekUsage) => {
+				recordUsage(usage, prepared.modelId);
+				const charsPerToken = updateCharsPerToken(
+					prepared.totalRequestChars,
+					usage,
+					getCharsPerToken(),
+				);
+				setCharsPerToken(charsPerToken);
+				prepared.cacheDiagnostics.onUsage(usage, charsPerToken);
+				reportCopilotContextUsage(progress, usage, prepared.requestKind);
 			},
-			token,
-		)
+		},
+		token,
+		precheck,
+	)
 		.then(undefined, (error) => {
 			reportSkippedReplayMarkerIfNeeded(
 				prepared,

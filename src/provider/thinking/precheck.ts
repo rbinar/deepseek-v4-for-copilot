@@ -1,5 +1,5 @@
 import { DeepSeekRequestError } from '../../client/error';
-import { OFFICIAL_DEEPSEEK_API_HOST } from '../../client/consts';
+import { OFFICIAL_DEEPSEEK_API_HOST } from '../../endpoint';
 import { logger } from '../../logger';
 import type { DeepSeekRequest } from '../../types';
 import type { ThinkingEffort } from '../models';
