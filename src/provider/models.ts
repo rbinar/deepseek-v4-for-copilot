@@ -7,7 +7,8 @@ import { toModelCostInfo, type ModelCostInformation } from './pricing/costs';
  * NOTE: Non-public API surface.
  *
  * The fields below (`configurationSchema` on chat info, cost metadata,
- * `modelConfiguration` on response options, plus `isUserSelectable` / `statusIcon`)
+ * `modelConfiguration` on response options, plus `isBYOK` / `isUserSelectable` /
+ * `statusIcon`)
  * are not part of the stable `vscode.LanguageModelChat*` typings yet. They are
  * the same shape currently consumed by GitHub Copilot Chat to render model picker
  * metadata and per-model configuration controls.
@@ -27,6 +28,7 @@ type ModelConfigurationSchema = ReturnType<typeof buildModelConfigurationSchema>
 export type ModelPickerChatInformation = vscode.LanguageModelChatInformation &
 	ModelCostInformation & {
 		readonly isUserSelectable: boolean;
+		readonly isBYOK: true;
 		readonly statusIcon?: vscode.ThemeIcon;
 		readonly configurationSchema?: ModelConfigurationSchema;
 	};
@@ -48,6 +50,7 @@ export function toChatInfo(
 		tooltip: hasApiKey ? modelTooltip : t('auth.apiKeyRequiredDetail'),
 		statusIcon: hasApiKey ? undefined : new vscode.ThemeIcon('warning'),
 		...resolveContextWindow(m, contextSize),
+		isBYOK: true,
 		isUserSelectable: true,
 		capabilities: {
 			toolCalling: m.capabilities.toolCalling,
